@@ -94,7 +94,7 @@ class Data:
                 self.cities.append(city)
 
 
-data = Data("UK15_01.txt")
+data = Data("UK10_01.txt")
 data.FetchInstance()
 
 prp = LpProblem("Pollution_Rounting_Problem", LpMinimize)
@@ -104,7 +104,6 @@ cities_demands = [x.demand for x in data.cities]
 cities_arrival = [x.readyTime for x in data.cities]
 cities_dueTime = [x.dueTime for x in data.cities]
 cities_service = [x.serviceTime for x in data.cities]
-
 
 #arches = list(filter(lambda x: len(x) == 2, [tuple(c) for c in allcombinations(cities_id,2)]))
 
@@ -172,7 +171,6 @@ for i in range(1,data.size + 1): #4.14
         y_i[i] <= cities_dueTime[i]
     )
 
-
 for i in range(data.size + 1): #4.13
     for j in range(1,data.size + 1):
         if i != j:
@@ -180,7 +178,6 @@ for i in range(data.size + 1): #4.13
             prp += (
                 y_i[i] - y_i[j] + cities_service[i] + lpSum((data.distances[i,j]/data.velocities[r])*z_ij[r][i][j] for r in range(len(data.velocities))) <= Mij * (1 - x_ij[i][j])
             )
-
 
 for j in range(1,data.size + 1):
     L = 10000000 # melhorar
@@ -192,6 +189,16 @@ for i in range(data.size + 1): # 4.16
     for j in range(data.size + 1):
         if i != j:
             prp += lpSum(z_ij[r][i][j] for r in range(len(data.velocities))) == x_ij[i][j]
+
+for i in range(data.size + 1): #4.20
+    for j in range(1, data.size + 1):
+        prp += lpSum(x_ij[i][j] + x_ij[j][i]) <= 1
+
+for i in range(1, data.size + 1):
+    prp += y_i[i] - lpSum(lpSum(max(0,cities_arrival[j] - cities_arrival[i] + cities_service[j] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) <= cities_arrival[i]
+
+for i in range(1, data.size + 1):
+    prp += y_i[i] + lpSum(lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) >= cities_dueTime[i]
 
 prp.solve()
 

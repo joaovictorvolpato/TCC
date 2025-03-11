@@ -13,12 +13,18 @@ surface_area_m2 = 3.912
 air_density = 1.2041
 aerodynamics_drag_coef = 0.7
 rolling_resistance = 0.01
+k = 0.2 #friction factor
+N = 33 #engine speed
+V = 5 #engine displacement
+lambda_ = 1/44*737 # lambda = Espilon/heating value * conversion factor
+ntf = 0.4
+n = 0.9
+gamma = 1/1000 * ntf * n
 
 
 a = 0 # a for accelaration -> we assume constant velocity
 alpha = a + gravity * math.sin(0) + gravity * rolling_resistance * math.cos(0)
 beta = 0.5 * aerodynamics_drag_coef * surface_area_m2 * air_density
-
 
 
 class City:
@@ -94,114 +100,120 @@ class Data:
                 self.cities.append(city)
 
 
-data = Data("UK10_01.txt")
-data.FetchInstance()
+def build_model(instance: str) -> LpProblem:
+    data = Data(instance)
+    data.FetchInstance()
 
-prp = LpProblem("Pollution_Rounting_Problem", LpMinimize)
+    prp = LpProblem("Pollution_Rounting_Problem", LpMinimize)
 
-cities_id = [x.id for x in data.cities]
-cities_demands = [x.demand for x in data.cities]
-cities_arrival = [x.readyTime for x in data.cities]
-cities_dueTime = [x.dueTime for x in data.cities]
-cities_service = [x.serviceTime for x in data.cities]
+    cities_demands = [x.demand for x in data.cities]
+    cities_arrival = [x.readyTime for x in data.cities]
+    cities_dueTime = [x.dueTime for x in data.cities]
+    cities_service = [x.serviceTime for x in data.cities]
 
-#arches = list(filter(lambda x: len(x) == 2, [tuple(c) for c in allcombinations(cities_id,2)]))
+    #arches = list(filter(lambda x: len(x) == 2, [tuple(c) for c in allcombinations(cities_id,2)]))
 
-#variáveis de decisão
-x_ij = [[pulp.LpVariable(f"x_{i}_{j}", lowBound=0, upBound=1 ,cat="Integer") for j in range(data.size + 1)] for i in range(data.size + 1)]
-z_ij = [[[pulp.LpVariable(f"z_{r}_{i}_{j}", lowBound=0, upBound=1 ,cat="Integer") for j in range(data.size + 1)] for i in range(data.size + 1)] for r in range(len(data.velocities))]
-f_ij = [[pulp.LpVariable(f"f_{i}_{j}", cat="Continuous", lowBound=0) for j in range(data.size + 1)] for i in range(data.size + 1)]
-y_i = [pulp.LpVariable(f"y_{i}", cat="Continuous",lowBound=0) for i in range(data.size+1)]
-s_j = [pulp.LpVariable(f"s_{j}", cat="Continuous", lowBound=0) for j in range(data.size + 1)]
+    #variáveis de decisão
+    x_ij = [[pulp.LpVariable(f"x_{i}_{j}", lowBound=0, upBound=1 ,cat="Integer") for j in range(data.size + 1)] for i in range(data.size + 1)]
+    z_ij = [[[pulp.LpVariable(f"z_{r}_{i}_{j}", lowBound=0, upBound=1 ,cat="Integer") for j in range(data.size + 1)] for i in range(data.size + 1)] for r in range(len(data.velocities))]
+    f_ij = [[pulp.LpVariable(f"f_{i}_{j}", cat="Continuous", lowBound=0) for j in range(data.size + 1)] for i in range(data.size + 1)]
+    y_i = [pulp.LpVariable(f"y_{i}", cat="Continuous",lowBound=0) for i in range(data.size+1)]
+    s_j = [pulp.LpVariable(f"s_{j}", cat="Continuous", lowBound=0) for j in range(data.size + 1)]
 
-#obejective function
+    l_j = []
+    for x in range(data.size + 1):
+        l_j.append(cities_dueTime[x] + cities_service[x] + data.distances[x,0]/data.minSpeed)
 
-pt1 = lpSum((fuel_co2_cost) * alpha * data.distances[i,j] * data.curbweight * x_ij[i][j] for i in range(data.size + 1) for j in range(data.size + 1))
+    #obejective function
 
-pt2 = lpSum((fuel_co2_cost) * alpha * f_ij[i][j] * data.distances[i,j] for i in range(data.size + 1) for j in range(data.size + 1))
+    #Lj -> worst case end of time window of node j + service time on j + time on j -> 0 on lowest velocity possible
 
-#vel = lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities)))
+    pt1 = lpSum(fuel_co2_cost * alpha * data.distances[i,j] * data.curbweight * x_ij[i][j] for i in range(data.size + 1) for j in range(data.size + 1))
 
-pt3 = lpSum((fuel_co2_cost) * beta * data.distances[i,j] * lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1) )
+    pt2 = lpSum(fuel_co2_cost * alpha * f_ij[i][j] * data.distances[i,j] for i in range(data.size + 1) for j in range(data.size + 1))
 
-pt4 = lpSum(driver_cost * s_j[j] for j in range(data.size + 1) )
+    #vel = lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities)))
 
-prp += pt1 + pt2 + pt3 + pt4
+    pt3 = lpSum(fuel_co2_cost  * beta * data.distances[i,j] * lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1) )
 
-#restrições 
+    pt4 = lpSum(driver_cost * s_j[j] for j in range(data.size + 1) )
 
-#prp += (
-#    lpSum(y_i[j] + cities_service[j] + (data.distances[j,0]/data.velocities[r] *  z_ij[r][i][0]) for i in range(data.size + 1) for j in range(data.size + 1) for r in range(len(data.velocities)) == s_j[j] for j in range(data.size + 1))
-#)
+    pt5 = lpSum(k * N * V * lambda_ * data.distances[i,j] * lpSum(data.velocities[r] * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1))
 
-prp += (
-    lpSum(x_ij[0][j] for j in range(data.size + 1)) <= data.size #4.8
-)
+    prp += pt1 + pt2 + pt3 + pt4
 
-for i in range(1,data.size+1): #4.9
-    prp += lpSum(x_ij[i][j] for j in range(data.size+1)) == 1
+    #restrições 
 
-for j in range(1,data.size+1): #4.10
-    prp += lpSum(x_ij[i][j] for i in range(data.size+1)) == 1
+    #prp += (
+    #    lpSum(y_i[j] + cities_service[j] + (data.distances[j,0]/data.velocities[r] *  z_ij[r][i][0]) for i in range(data.size + 1) for j in range(data.size + 1) for r in range(len(data.velocities)) == s_j[j] for j in range(data.size + 1))
+    #)
 
-for i in range(1, data.size+1): #4.11
     prp += (
-        lpSum(f_ij[j][i] for j in range(data.size + 1)) - lpSum(f_ij[i][j] for j in range(data.size + 1)) == cities_demands[i]
+        lpSum(x_ij[0][j] for j in range(data.size + 1)) <= data.size #4.8
     )
 
-for i in range(data.size + 1): # 4.12
-    for j in range(data.size + 1):
+    for i in range(1,data.size+1): #4.9
+        prp += lpSum(x_ij[i][j] for j in range(data.size+1)) == 1
+
+    for j in range(1,data.size+1): #4.10
+        prp += lpSum(x_ij[i][j] for i in range(data.size+1)) == 1
+
+    for i in range(1, data.size+1): #4.11
         prp += (
-            cities_demands[i]*x_ij[i][j] <= f_ij[i][j]
+            lpSum(f_ij[j][i] for j in range(data.size + 1)) - lpSum(f_ij[i][j] for j in range(data.size + 1)) == cities_demands[i]
         )
 
-for i in range(data.size + 1): # 4.12
-    for j in range(data.size + 1):
-        prp += (
-            f_ij[i][j] <= (data.curbweight-cities_demands[i])*x_ij[i][j]
-        )
-
-for i in range(1,data.size + 1): #4.14
-    prp += (
-        cities_arrival[i] <= y_i[i]
-    )
-
-for i in range(1,data.size + 1): #4.14
-    prp += (
-        y_i[i] <= cities_dueTime[i]
-    )
-
-for i in range(data.size + 1): #4.13
-    for j in range(1,data.size + 1):
-        if i != j:
-            Mij = max(0, cities_dueTime[i] + cities_service[i] + data.distances[i,j]/data.minSpeed - cities_arrival[j])
+    for i in range(data.size + 1): # 4.12
+        for j in range(data.size + 1):
             prp += (
-                y_i[i] - y_i[j] + cities_service[i] + lpSum((data.distances[i,j]/data.velocities[r])*z_ij[r][i][j] for r in range(len(data.velocities))) <= Mij * (1 - x_ij[i][j])
+                cities_demands[i]*x_ij[i][j] <= f_ij[i][j]
             )
 
-for j in range(1,data.size + 1):
-    L = 10000000 # melhorar
-    prp += (
-        y_i[j] + cities_service[j] - s_j[j]  + lpSum((data.distances[j,0]/data.velocities[r])*z_ij[r][j][0] for r in range(len(data.velocities))) <= L * (1 - x_ij[j][0])
-    )
+    for i in range(data.size + 1): # 4.12
+        for j in range(data.size + 1):
+            prp += (
+                f_ij[i][j] <= (data.curbweight-cities_demands[i])*x_ij[i][j]
+            )
 
-for i in range(data.size + 1): # 4.16
-    for j in range(data.size + 1):
-        if i != j:
-            prp += lpSum(z_ij[r][i][j] for r in range(len(data.velocities))) == x_ij[i][j]
+    for i in range(1,data.size + 1): #4.14
+        prp += (
+            cities_arrival[i] <= y_i[i]
+        )
 
-for i in range(data.size + 1): #4.20
-    for j in range(1, data.size + 1):
-        prp += lpSum(x_ij[i][j] + x_ij[j][i]) <= 1
+    for i in range(1,data.size + 1): #4.14
+        prp += (
+            y_i[i] <= cities_dueTime[i]
+        )
 
-for i in range(1, data.size + 1):
-    prp += y_i[i] - lpSum(lpSum(max(0,cities_arrival[j] - cities_arrival[i] + cities_service[j] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) <= cities_arrival[i]
+    for i in range(data.size + 1): #4.13
+        for j in range(1,data.size + 1):
+            if i != j:
+                Mij = max(0, cities_dueTime[i] + cities_service[i] + data.distances[i,j]/data.minSpeed - cities_arrival[j])
+                prp += (
+                    y_i[i] - y_i[j] + cities_service[i] + lpSum((data.distances[i,j]/data.velocities[r])*z_ij[r][i][j] for r in range(len(data.velocities))) <= Mij * (1 - x_ij[i][j])
+                )
 
-for i in range(1, data.size + 1):
-    prp += y_i[i] + lpSum(lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) >= cities_dueTime[i]
+    for j in range(1,data.size + 1):
+        prp += (
+            y_i[j] + cities_service[j] - s_j[j]  + lpSum((data.distances[j,0]/data.velocities[r])*z_ij[r][j][0] for r in range(len(data.velocities))) <= l_j[j] * (1 - x_ij[j][0])
+        )
 
-prp.solve()
+    for i in range(data.size + 1): # 4.16
+        for j in range(data.size + 1):
+            if i != j:
+                prp += lpSum(z_ij[r][i][j] for r in range(len(data.velocities))) == x_ij[i][j]
 
+    for i in range(data.size + 1): #4.20
+        for j in range(1, data.size + 1):
+            prp += lpSum(x_ij[i][j] + x_ij[j][i]) <= 1
+
+    for i in range(1, data.size + 1):
+        prp += y_i[i] - lpSum(lpSum(max(0,cities_arrival[j] - cities_arrival[i] + cities_service[j] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) <= cities_arrival[i]
+
+    for i in range(1, data.size + 1):
+        prp += y_i[i] + lpSum(lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) >= cities_dueTime[i]
+
+    return prp
 
         
 

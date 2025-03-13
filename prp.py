@@ -7,7 +7,7 @@ path = "/home/joaovolp/TCC/"
 
 fuel_co2_cost = 1.4
 driver_cost = 0.0022
-gravity = 9.82
+gravity = 9.81
 disel_efficency = 0.9
 surface_area_m2 = 3.912
 air_density = 1.2041
@@ -16,10 +16,10 @@ rolling_resistance = 0.01
 k = 0.2 #friction factor
 N = 33 #engine speed
 V = 5 #engine displacement
-lambda_ = 1/44*737 # lambda = Espilon/heating value * conversion factor
+lambda_ = 1/(44*737) # lambda = Espilon/heating value * conversion factor
 ntf = 0.4
 n = 0.9
-gamma = 1/1000 * ntf * n
+gamma = 1/(1000 * ntf * n)
 
 
 a = 0 # a for accelaration -> we assume constant velocity
@@ -43,7 +43,7 @@ class Data:
     def __init__(self, filename : str):
         self.filename = filename
         self.size = int
-        self.load = int
+        self.max_load = int
         self.weight = int
         self.maxSpeed = int
         self.minSpeed = int
@@ -62,8 +62,8 @@ class Data:
             self.size = int(lines[0])
             self.curbweight, _, _ = lines[1].strip().partition('\t')
             self.curbweight = int(self.curbweight)
-            _, _, self.load = lines[1].strip().partition('\t')
-            self.load = int(self.load)
+            _, _, self.max_load = lines[1].strip().partition('\t')
+            self.max_load = int(self.max_load)
             self.minSpeed, _, _ = lines[2].strip().partition('\t')
             self.minSpeed = int(self.minSpeed)/3.6
             _, _, self.maxSpeed = lines[2].strip().partition('\t')
@@ -98,6 +98,10 @@ class Data:
                 _,_,demand = info[1].strip().partition(' ')
                 city = City(num=info[0], name=name, demand=demand, readyTime=info[2], dueTime=info[3], serviceTime=info[4])
                 self.cities.append(city)
+
+            print("max_Load:",self.max_load)
+
+            print("Curbweight:",self.curbweight)
 
 
 def build_model(instance: str) -> LpProblem:
@@ -140,7 +144,7 @@ def build_model(instance: str) -> LpProblem:
 
     pt5 = lpSum(k * N * V * lambda_ * data.distances[i,j] * lpSum(data.velocities[r] * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1))
 
-    prp += pt1 + pt2 + pt3 + pt4
+    prp += pt1 + pt2 + pt3 + pt4 + pt5
 
     #restrições 
 
@@ -166,13 +170,13 @@ def build_model(instance: str) -> LpProblem:
     for i in range(data.size + 1): # 4.12
         for j in range(data.size + 1):
             prp += (
-                cities_demands[i]*x_ij[i][j] <= f_ij[i][j]
+                cities_demands[j]*x_ij[i][j] <= f_ij[i][j]
             )
 
     for i in range(data.size + 1): # 4.12
         for j in range(data.size + 1):
             prp += (
-                f_ij[i][j] <= (data.curbweight-cities_demands[i])*x_ij[i][j]
+                f_ij[i][j] <= (data.max_load - cities_demands[i])*x_ij[i][j]
             )
 
     for i in range(1,data.size + 1): #4.14
@@ -208,12 +212,15 @@ def build_model(instance: str) -> LpProblem:
             prp += lpSum(x_ij[i][j] + x_ij[j][i]) <= 1
 
     for i in range(1, data.size + 1):
-        prp += y_i[i] - lpSum(lpSum(max(0,cities_arrival[j] - cities_arrival[i] + cities_service[j] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) <= cities_arrival[i]
-
+        prp += y_i[i] - lpSum(max(0, cities_arrival[j] - cities_arrival[i] + cities_service[j] + data.distances[j,i]/data.velocities[r])*z_ij[r][j][i] for r in range(len(data.velocities)) for j in range(data.size + 1)) >= cities_arrival[i]
+    
     for i in range(1, data.size + 1):
-        prp += y_i[i] + lpSum(lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[j,i]/data.velocities[r]) for r in range(len(data.velocities))) for j in range(data.size + 1)) >= cities_dueTime[i]
-
+        prp += y_i[i] + lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[i,j]/data.velocities[r])*z_ij[r][i][j] for r in range(len(data.velocities)) for j in range(data.size + 1)) <= cities_dueTime[i]
     return prp
+
+model = build_model("UK03_test.txt")
+
+model.solve()
 
         
 

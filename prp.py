@@ -132,17 +132,17 @@ def build_model(instance: str) -> LpProblem:
 
     #Lj -> worst case end of time window of node j + service time on j + time on j -> 0 on lowest velocity possible
 
-    pt1 = lpSum(fuel_co2_cost * alpha * data.distances[i,j] * data.curbweight * x_ij[i][j] for i in range(data.size + 1) for j in range(data.size + 1))
+    pt1 = lpSum(fuel_co2_cost * lambda_* gamma * alpha * data.distances[i,j] * data.curbweight * x_ij[i][j] for i in range(data.size + 1) for j in range(data.size + 1))
 
-    pt2 = lpSum(fuel_co2_cost * alpha * f_ij[i][j] * data.distances[i,j] for i in range(data.size + 1) for j in range(data.size + 1))
+    pt2 = lpSum(fuel_co2_cost * lambda_* gamma * alpha * f_ij[i][j] * data.distances[i,j] for i in range(data.size + 1) for j in range(data.size + 1))
 
     #vel = lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities)))
 
-    pt3 = lpSum(fuel_co2_cost  * beta * data.distances[i,j] * lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1) )
+    pt3 = lpSum(fuel_co2_cost * lambda_* gamma  * beta * data.distances[i,j] * lpSum(data.velocities[r]**2 * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1) )
 
     pt4 = lpSum(driver_cost * s_j[j] for j in range(data.size + 1) )
 
-    pt5 = lpSum(k * N * V * lambda_ * data.distances[i,j] * lpSum(data.velocities[r] * z_ij[r][i][j] for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1))
+    pt5 = lpSum(fuel_co2_cost * k * N * V * lambda_ * data.distances[i,j] * lpSum(z_ij[r][i][j] * 1 / data.velocities[r]  for r in range(len(data.velocities))) for j in range(data.size + 1) for i in range(data.size + 1))
 
     prp += pt1 + pt2 + pt3 + pt4 + pt5
 
@@ -207,7 +207,7 @@ def build_model(instance: str) -> LpProblem:
             if i != j:
                 prp += lpSum(z_ij[r][i][j] for r in range(len(data.velocities))) == x_ij[i][j]
 
-    for i in range(data.size + 1): #4.20
+    for i in range(1, data.size + 1): #4.20
         for j in range(1, data.size + 1):
             prp += lpSum(x_ij[i][j] + x_ij[j][i]) <= 1
 
@@ -218,7 +218,7 @@ def build_model(instance: str) -> LpProblem:
         prp += y_i[i] + lpSum(max(0,cities_dueTime[i] - cities_dueTime[j] + cities_service[i] + data.distances[i,j]/data.velocities[r])*z_ij[r][i][j] for r in range(len(data.velocities)) for j in range(data.size + 1)) <= cities_dueTime[i]
     return prp
 
-model = build_model("UK03_test.txt")
+model = build_model("UK10_01.txt")
 
 model.solve()
 
